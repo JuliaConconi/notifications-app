@@ -1,21 +1,19 @@
 import React, { useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ImageBackground, KeyboardAvoidingView, Platform } from 'react-native';
-import { getAuth, signInWithEmailAndPassword } from 'firebase/auth';
-import app from '../../firebaseConfig';
+import { loginComEmailESenha } from "../../authService";
 
 const realizarLogin = ({ navigation }) => {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
 
     const tentarLogar = () => {
-        const auth = getAuth(app);
-        signInWithEmailAndPassword(auth, email, password)
-            .then(() => {
-                navigation.navigate('PaginaPrincipal');
-            })
-            .catch(error => {
-                console.error('Login failed:', error);
-            });
+        loginComEmailESenha(email, password)
+        .then(() => {
+            navigation.navigate('PaginaPrincipal');
+        })
+        .catch(error => {
+            console.error('Login faied: ', error);
+        });
     };
 
     return (

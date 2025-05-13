@@ -1,13 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import {
     View, Text, StyleSheet, Alert, FlatList, Pressable,
-    Button, Modal, TextInput
+    Modal, TextInput
 } from 'react-native';
-import { db, collection, getDocs, doc, addDoc, updateDoc, deleteDoc } from "../../firebaseConfig";
+import {
+    collection, getDocs, doc, addDoc, updateDoc, deleteDoc,
+    Timestamp
+} from 'firebase/firestore';
+import { db } from "../../firebaseConfig";
 import { format } from 'date-fns';
 import Icon from 'react-native-vector-icons/FontAwesome';
+import * as Notifications from 'expo-notifications';
 
-const App = () => {
+const App = ({ navigation }) => {
     const [dados, setDados] = useState([]);
     const [modalVisible, setModalVisible] = useState(false);
     const [modalAddVisible, setModalAddVisible] = useState(false);
@@ -17,6 +22,27 @@ const App = () => {
     const [camisa, setCamisa] = useState('');
     const [altura, setAltura] = useState('');
     const [nascimento, setNascimento] = useState('');
+
+    useEffect(() => {
+        const subscription = Notifications.addNotificationReceivedListener(
+            (notification) => {
+                console.log("Notificação recebida: ", notification);
+            }
+        );
+        return () => subscription.remove();
+    }, []);
+
+    const requestLocalNotificationPermission = async () => {
+        const { status } = await Notifications.requestPermissionsAsync();
+        if (status !== 'granted') {
+            Alert.alert(
+                "Permissão negada",
+                "Ative as notificações para visualizar os avisos."
+            );
+            return false;
+        }
+        return true;
+    };
 
     const buscarDados = async () => {
         try {
@@ -35,21 +61,39 @@ const App = () => {
         buscarDados();
     }, []);
 
-    const handleAdd = async () => {
+    const addJogador = async () => {
         if (!nome || !camisa || !altura || !nascimento) {
-            Alert.alert("Preencha todos os campos");
+            Alert.alert("Erro", "Preencha todos os campos.");
             return;
         }
 
         try {
-            const novoJogador = {
-                nome,
-                camisa: parseInt(camisa),
-                altura: parseFloat(altura),
-                nascimento: new Date(nascimento),
-            };
+            const jogadoresCollection = collection(db, "real-madrid");
 
-            await addDoc(collection(db, "real-madrid"), novoJogador);
+            const [day, month, year] = nascimento.split("/");
+            const nascimentoDate = new Date(`${year}-${month}-${day}T00:00:00`);
+            const nascimentoTimestamp = Timestamp.fromDate(nascimentoDate);
+
+            await addDoc(jogadoresCollection, {
+                nome,
+                camisa,
+                altura: parseFloat(altura),
+                nascimento: nascimentoTimestamp,
+            });
+
+            const permissao = await requestLocalNotificationPermission();
+
+            if (permissao) {
+                await Notifications.scheduleNotificationAsync({
+                    content: {
+                        title: "Novo jogador adicionado!",
+                        body: `${nome} foi incluído no elenco`,
+                        sound: true,
+                    },
+                    trigger: null,
+                });
+            }
+
             Alert.alert("Sucesso", "Jogador adicionado com sucesso!");
             setModalAddVisible(false);
             limparCampos();
@@ -64,7 +108,7 @@ const App = () => {
         setNome(item.nome || '');
         setCamisa(item.camisa?.toString() || '');
         setAltura(item.altura?.toString() || '');
-        setNascimento(item.nascimento?.toDate()?.toISOString().split('T')[0] || '');
+        setNascimento(item.nascimento ? format(item.nascimento.toDate(), 'dd/MM/yyyy') : '');
         setModalVisible(true);
     };
 
@@ -72,13 +116,18 @@ const App = () => {
         if (!jogadorEditando) return;
 
         try {
+            const [day, month, year] = nascimento.split('/');
+            const nascimentoDate = new Date(`${year}-${month}-${day}T00:00:00`);
+            const nascimentoTimestamp = Timestamp.fromDate(nascimentoDate);
+
             const jogadorRef = doc(db, "real-madrid", jogadorEditando.id);
             await updateDoc(jogadorRef, {
                 nome,
                 camisa: parseInt(camisa),
                 altura: parseFloat(altura),
-                nascimento: new Date(nascimento)
+                nascimento: nascimentoTimestamp,
             });
+
             Alert.alert("Sucesso", "Jogador editado com sucesso!");
             setModalVisible(false);
             setJogadorEditando(null);
@@ -110,7 +159,6 @@ const App = () => {
     return (
         <View style={styles.container}>
 
-            {/* Botão de Adicionar Jogador*/}
             <Pressable
                 onPress={() => setModalAddVisible(true)}
                 style={({ pressed }) => [
@@ -145,7 +193,13 @@ const App = () => {
                                 <Icon name="pencil" size={24} color="blue" />
                             </Pressable>
 
-                            <Pressable onPress={() => handleDelete(item.id)} style={({ pressed }) => [styles.iconButton, pressed && styles.iconPressed]}>
+                            <Pressable
+                                onPress={() => handleDelete(item.id)}
+                                style={({ pressed }) => [
+                                    styles.iconButton,
+                                    pressed && styles.iconPressed
+                                ]}
+                            >
                                 <Icon name="trash" size={24} color="red" />
                             </Pressable>
                         </View>
@@ -160,30 +214,16 @@ const App = () => {
                         <TextInput placeholder="Nome" value={nome} onChangeText={setNome} style={styles.input} />
                         <TextInput placeholder="Camisa" value={camisa} onChangeText={setCamisa} keyboardType="numeric" style={styles.input} />
                         <TextInput placeholder="Altura" value={altura} onChangeText={setAltura} keyboardType="numeric" style={styles.input} />
-                        <TextInput placeholder="Nascimento" value={nascimento} onChangeText={setNascimento} style={styles.input} />
+                        <TextInput placeholder="Nascimento (dd/MM/yyyy)" value={nascimento} onChangeText={setNascimento} style={styles.input} />
 
                         <View style={styles.modalButtons}>
-                            <Pressable
-                                onPress={() => setModalVisible(false)}
-                                style={({ pressed }) => [
-                                    styles.modalButton,
-                                    pressed && styles.modalButtonPressed
-                                ]}
-                            >
+                            <Pressable onPress={() => setModalVisible(false)} style={styles.modalButton}>
                                 <Text style={styles.modalButtonText}>Cancelar</Text>
                             </Pressable>
-
-                            <Pressable
-                                onPress={salvarEdicao}
-                                style={({ pressed }) => [
-                                    styles.modalButton,
-                                    pressed && styles.modalButtonPressed
-                                ]}
-                            >
+                            <Pressable onPress={salvarEdicao} style={styles.modalButton}>
                                 <Text style={styles.modalButtonText}>Salvar</Text>
                             </Pressable>
                         </View>
-
                     </View>
                 </View>
             </Modal>
@@ -195,36 +235,24 @@ const App = () => {
                         <TextInput placeholder="Nome" value={nome} onChangeText={setNome} style={styles.input} />
                         <TextInput placeholder="Camisa" value={camisa} onChangeText={setCamisa} keyboardType="numeric" style={styles.input} />
                         <TextInput placeholder="Altura" value={altura} onChangeText={setAltura} keyboardType="numeric" style={styles.input} />
-                        <TextInput placeholder="Nascimento" value={nascimento} onChangeText={setNascimento} style={styles.input} />
+                        <TextInput placeholder="Nascimento (dd/MM/yyyy)" value={nascimento} onChangeText={setNascimento} style={styles.input} />
 
                         <View style={styles.modalButtons}>
-                            <Pressable
-                                onPress={() => setModalAddVisible(false)}
-                                style={({ pressed }) => [
-                                    styles.modalButton,
-                                    pressed && styles.modalButtonPressed
-                                ]}
-                            >
+                            <Pressable onPress={() => setModalAddVisible(false)} style={styles.modalButton}>
                                 <Text style={styles.modalButtonText}>Cancelar</Text>
                             </Pressable>
-
-                            <Pressable
-                                onPress={handleAdd}
-                                style={({ pressed }) => [
-                                    styles.modalButton,
-                                    pressed && styles.modalButtonPressed
-                                ]}
-                            >
+                            <Pressable onPress={addJogador} style={styles.modalButton}>
                                 <Text style={styles.modalButtonText}>Adicionar</Text>
                             </Pressable>
                         </View>
-
                     </View>
                 </View>
             </Modal>
         </View>
     );
 };
+
+export default App;
 
 const styles = StyleSheet.create({
     container: {
@@ -358,5 +386,3 @@ const styles = StyleSheet.create({
         backgroundColor: '#32CD32',
     },
 });
-
-export default App;
